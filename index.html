@@ -1,290 +1,435 @@
-<style>
-  body {
-    margin: 0;
-    background: #0c4a6e;
-  }
-</style>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Cube Game</title>
+    <style>
+        body { margin: 0; overflow: hidden; }
+        #gameCanvas { width: 100%; height: 100%; display: block; }
+        #gameUI {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-family: Arial, sans-serif;
+        }
+        #score { font-size: 24px; }
+        #gameControls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            margin: 5px;
+            cursor: pointer;
+        }
+        #scoreboardOverlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(30, 42, 56, 0.9);
+            justify-content: center;
+            align-items: center; 
+            z-index: 1000;
+        }
+        #scoreboardModal {
+            background: #fff;
+            padding: 30px;
+            border-radius: 8px;
+            width: 80%;
+            max-width: 600px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+            position: relative;
+        }
+        /* Table styles */
+        #scoreboardContent table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        #scoreboardContent th, #scoreboardContent td {
+            text-align: left;
+            padding: 8px;
+            border-bottom: 1px solid #ddd;
+        }
+        #closeScoreboard {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: #ff4d4f;
+            border: none;
+            padding: 8px 12px;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        #closeScoreboard:hover {
+            background: #ff7875;
+        }
+    </style>
+</head>
+<body style="user-select: none;">
+    <canvas id="gameCanvas"></canvas>
+    <div id="gameUI">
+        <div id="score">Score: 0</div>
+    </div>
+    <div id="gameControls">
+        <button id="startButton">Start Game</button>
+        <button id="pauseButton" style="display: none;">Pause</button>
+        <button id="exitButton" style="display: none;">Exit</button>
+        <button id="scoreboardBtn">Show Leaderboard</button>
+    </div>
 
-<script
-  async
-  src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"
-></script>
+    <div id="scoreboardOverlay">
+        <div id="scoreboardModal">
+            <h2>Leaderboard</h2>
+            <div id="scoreboardContent"></div>
+            <button id="closeScoreboard">Close</button>
+        </div>
+    </div>
 
-<script type="importmap">
-  {
-    "imports": {
-      "three": "https://unpkg.com/three@0.150.1/build/three.module.js",
-      "three/addons/": "https://unpkg.com/three@0.150.1/examples/jsm/"
-    }
-  }
-</script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // Game variables
+        let scene, camera, renderer, cube, ground, enemies = [];
+        let score = 0;
+        let gameState = 'idle';
+        let lastTime = 0;
+        let cameraAngleX = 0;
+        let cameraAngleY = 0;
+        let isMouseDown = false;
+        let playerName = '';
+    
+        async function loadScoreboard() {
+            try {
+                const response = await fetch('http://localhost:3000/api/scores');
+                if (response.ok) {
+                    const scores = await response.json();
+                    const scoreboardContent = document.getElementById('scoreboardContent');
+                    scoreboardContent.innerHTML = '';
+                    
+                    const table = document.createElement('table');
+                    
+                    const thead = document.createElement('thead');
+                    const headerRow = document.createElement('tr');
+                    ['Name', 'Score', 'Date'].forEach(text => {
+                        const th = document.createElement('th');
+                        th.textContent = text;
+                        headerRow.appendChild(th);
+                    });
+                    thead.appendChild(headerRow);
+                    table.appendChild(thead);
+                    
+                    const tbody = document.createElement('tbody');
+                    scores.forEach(item => {
+                        const tr = document.createElement('tr');
+                        
+                        const tdName = document.createElement('td');
+                        tdName.textContent = item.name;
+                        tr.appendChild(tdName);
+                        
+                        const tdScore = document.createElement('td');
+                        tdScore.textContent = item.score;
+                        tr.appendChild(tdScore);
+                        
+                        const tdDate = document.createElement('td');
+                        tdDate.textContent = new Date(item.date).toLocaleString();
+                        tr.appendChild(tdDate);
+                        
+                        tbody.appendChild(tr);
+                    });
+                    table.appendChild(tbody);
+                    
+                    scoreboardContent.appendChild(table);
+                } else {
+                    console.error('Failed to fetch scores');
+                }
+            } catch (err) {
+                console.error('Error fetching scoreboard', err);
+            }
+        }
 
-<script type="module">
-  import * as THREE from 'three'
-  import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
+        document.getElementById('scoreboardBtn').addEventListener('click', async () => {
+            await loadScoreboard();
+            document.getElementById('scoreboardOverlay').style.display = 'flex';
+        });
 
-  const scene = new THREE.Scene()
-  const camera = new THREE.PerspectiveCamera(
-    75,
-    window.innerWidth / window.innerHeight,
-    0.1,
-    1000
-  )
-  camera.position.set(4.61, 2.74, 8)
+        document.getElementById('closeScoreboard').addEventListener('click', () => {
+            document.getElementById('scoreboardOverlay').style.display = 'none';
+        });
 
-  const renderer = new THREE.WebGLRenderer({
-    alpha: true,
-    antialias: true
-  })
-  renderer.shadowMap.enabled = true
-  renderer.setSize(window.innerWidth, window.innerHeight)
-  document.body.appendChild(renderer.domElement)
-
-  const controls = new OrbitControls(camera, renderer.domElement)
-
-  class Box extends THREE.Mesh {
-    constructor({
-      width,
-      height,
-      depth,
-      color = '#00ff00',
-      velocity = {
-        x: 0,
-        y: 0,
-        z: 0
-      },
-      position = {
-        x: 0,
-        y: 0,
-        z: 0
-      },
-      zAcceleration = false
-    }) {
-      super(
-        new THREE.BoxGeometry(width, height, depth),
-        new THREE.MeshStandardMaterial({ color })
-      )
-
-      this.width = width
-      this.height = height
-      this.depth = depth
-
-      this.position.set(position.x, position.y, position.z)
-
-      this.right = this.position.x + this.width / 2
-      this.left = this.position.x - this.width / 2
-
-      this.bottom = this.position.y - this.height / 2
-      this.top = this.position.y + this.height / 2
-
-      this.front = this.position.z + this.depth / 2
-      this.back = this.position.z - this.depth / 2
-
-      this.velocity = velocity
-      this.gravity = -0.002
-
-      this.zAcceleration = zAcceleration
-    }
-
-    updateSides() {
-      this.right = this.position.x + this.width / 2
-      this.left = this.position.x - this.width / 2
-
-      this.bottom = this.position.y - this.height / 2
-      this.top = this.position.y + this.height / 2
-
-      this.front = this.position.z + this.depth / 2
-      this.back = this.position.z - this.depth / 2
-    }
-
-    update(ground) {
-      this.updateSides()
-
-      if (this.zAcceleration) this.velocity.z += 0.0003
-
-      this.position.x += this.velocity.x
-      this.position.z += this.velocity.z
-
-      this.applyGravity(ground)
-    }
-
-    applyGravity(ground) {
-      this.velocity.y += this.gravity
-
-      // this is where we hit the ground
-      if (
-        boxCollision({
-          box1: this,
-          box2: ground
-        })
-      ) {
-        const friction = 0.5
-        this.velocity.y *= friction
-        this.velocity.y = -this.velocity.y
-      } else this.position.y += this.velocity.y
-    }
-  }
-
-  function boxCollision({ box1, box2 }) {
-    const xCollision = box1.right >= box2.left && box1.left <= box2.right
-    const yCollision =
-      box1.bottom + box1.velocity.y <= box2.top && box1.top >= box2.bottom
-    const zCollision = box1.front >= box2.back && box1.back <= box2.front
-
-    return xCollision && yCollision && zCollision
-  }
-
-  const cube = new Box({
-    width: 1,
-    height: 1,
-    depth: 1,
-    velocity: {
-      x: 0,
-      y: -0.01,
-      z: 0
-    }
-  })
-  cube.castShadow = true
-  scene.add(cube)
-
-  const ground = new Box({
-    width: 10,
-    height: 0.5,
-    depth: 50,
-    color: '#0369a1',
-    position: {
-      x: 0,
-      y: -2,
-      z: 0
-    }
-  })
-
-  ground.receiveShadow = true
-  scene.add(ground)
-
-  const light = new THREE.DirectionalLight(0xffffff, 1)
-  light.position.y = 3
-  light.position.z = 1
-  light.castShadow = true
-  scene.add(light)
-
-  scene.add(new THREE.AmbientLight(0xffffff, 0.5))
-
-  camera.position.z = 5
-  console.log(ground.top)
-  console.log(cube.bottom)
-
-  const keys = {
-    a: {
-      pressed: false
-    },
-    d: {
-      pressed: false
-    },
-    s: {
-      pressed: false
-    },
-    w: {
-      pressed: false
-    }
-  }
-
-  window.addEventListener('keydown', (event) => {
-    switch (event.code) {
-      case 'KeyA':
-        keys.a.pressed = true
-        break
-      case 'KeyD':
-        keys.d.pressed = true
-        break
-      case 'KeyS':
-        keys.s.pressed = true
-        break
-      case 'KeyW':
-        keys.w.pressed = true
-        break
-      case 'Space':
-        cube.velocity.y = 0.08
-        break
-    }
-  })
-
-  window.addEventListener('keyup', (event) => {
-    switch (event.code) {
-      case 'KeyA':
-        keys.a.pressed = false
-        break
-      case 'KeyD':
-        keys.d.pressed = false
-        break
-      case 'KeyS':
-        keys.s.pressed = false
-        break
-      case 'KeyW':
-        keys.w.pressed = false
-        break
-    }
-  })
-
-  const enemies = []
-
-  let frames = 0
-  let spawnRate = 200
-  function animate() {
-    const animationId = requestAnimationFrame(animate)
-    renderer.render(scene, camera)
-
-    // movement code
-    cube.velocity.x = 0
-    cube.velocity.z = 0
-    if (keys.a.pressed) cube.velocity.x = -0.05
-    else if (keys.d.pressed) cube.velocity.x = 0.05
-
-    if (keys.s.pressed) cube.velocity.z = 0.05
-    else if (keys.w.pressed) cube.velocity.z = -0.05
-
-    cube.update(ground)
-    enemies.forEach((enemy) => {
-      enemy.update(ground)
-      if (
-        boxCollision({
-          box1: cube,
-          box2: enemy
-        })
-      ) {
-        cancelAnimationFrame(animationId)
-      }
-    })
-
-    if (frames % spawnRate === 0) {
-      if (spawnRate > 20) spawnRate -= 20
-
-      const enemy = new Box({
-        width: 1,
-        height: 1,
-        depth: 1,
-        position: {
-          x: (Math.random() - 0.5) * 10,
-          y: 0,
-          z: -20
-        },
-        velocity: {
-          x: 0,
-          y: 0,
-          z: 0.005
-        },
-        color: 'red',
-        zAcceleration: true
-      })
-      enemy.castShadow = true
-      scene.add(enemy)
-      enemies.push(enemy)
-    }
-
-    frames++
-    // cube.position.y += -0.01
-    // cube.rotation.x += 0.01
-    // cube.rotation.y += 0.01
-  }
-  animate()
-</script>
+        // Set up the scene
+        function init() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 5, 10);
+            camera.lookAt(0, 0, 0);
+    
+            renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('gameCanvas'), antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+    
+            const light = new THREE.DirectionalLight(0xffffff, 1);
+            light.position.set(5, 10, 7);
+            light.castShadow = true;
+            light.shadow.mapSize.width = 1024;
+            light.shadow.mapSize.height = 1024;
+            light.shadow.camera.near = 1;
+            light.shadow.camera.far = 50;
+            scene.add(light);
+            scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+    
+            initializeGameObjects();
+    
+            window.addEventListener('resize', onWindowResize, false);
+            document.addEventListener('mousemove', onMouseMove, false);
+            document.addEventListener('mousedown', () => { isMouseDown = true; });
+            document.addEventListener('mouseup', () => { isMouseDown = false; });
+        }
+    
+        function initializeGameObjects() {
+            cube = createBox(1, 1, 1, 0x00ff00, 0, 0.5, 0);
+            cube.castShadow = true;
+            scene.add(cube);
+    
+            ground = createBox(20, 0.1, 100, 0x0369a1, 0, 0, 0);
+            ground.receiveShadow = true;
+            scene.add(ground);
+        }
+    
+        function createBox(width, height, depth, color, x, y, z) {
+            const geometry = new THREE.BoxGeometry(width, height, depth);
+            const material = new THREE.MeshStandardMaterial({ color });
+            const box = new THREE.Mesh(geometry, material);
+            box.position.set(x, y, z);
+            box.width = width;
+            box.height = height;
+            box.depth = depth;
+            box.velocity = { x: 0, y: 0, z: 0 };
+            return box;
+        }
+    
+        function resetGame() {
+            enemies.forEach(enemy => scene.remove(enemy));
+            enemies = [];
+            cube.position.set(0, 0.5, 0);
+            cube.velocity = { x: 0, y: 0, z: 0 };
+            score = 0;
+            updateScore();
+        }
+    
+        function startGame() {
+            playerName = prompt('Enter your name:');
+            if (!playerName) {
+                alert('Name is required to start the game.');
+                return;
+            }
+            localStorage.setItem('playerName', playerName);
+    
+            resetGame();
+            gameState = 'playing';
+            lastTime = performance.now();
+            document.getElementById('startButton').style.display = 'none';
+            document.getElementById('pauseButton').style.display = 'inline';
+            document.getElementById('exitButton').style.display = 'inline';
+        }
+    
+        function pauseGame() {
+            if (gameState === 'playing') {
+                gameState = 'paused';
+                document.getElementById('pauseButton').textContent = 'Resume';
+            } else if (gameState === 'paused') {
+                gameState = 'playing';
+                lastTime = performance.now();
+                document.getElementById('pauseButton').textContent = 'Pause';
+            }
+        }
+    
+        function exitGame() {
+            gameState = 'idle';
+            resetGame();
+            document.getElementById('startButton').style.display = 'inline';
+            document.getElementById('pauseButton').style.display = 'none';
+            document.getElementById('exitButton').style.display = 'none';
+        }
+    
+        function animate(currentTime) {
+            requestAnimationFrame(animate);
+    
+            if (gameState === 'playing') {
+                const deltaTime = (currentTime - lastTime) / 1000;
+                lastTime = currentTime;
+    
+                updateCube(deltaTime);
+                updateCamera();
+                updateEnemies(deltaTime);
+                spawnEnemies();
+            }
+    
+            renderer.render(scene, camera);
+        }
+    
+        function updateCube(deltaTime) {
+            cube.position.x += cube.velocity.x * deltaTime;
+            cube.position.z += cube.velocity.z * deltaTime;
+    
+            cube.velocity.y += -20 * deltaTime; // Increased gravity
+            cube.position.y += cube.velocity.y * deltaTime;
+    
+            if (cube.position.y < 0.5) {
+                cube.position.y = 0.5;
+                cube.velocity.y = 0;
+            }
+    
+            // Keep the cube within the ground boundaries
+            cube.position.x = Math.max(-9, Math.min(9, cube.position.x));
+            cube.position.z = Math.max(-49, Math.min(49, cube.position.z));
+        }
+    
+        function updateCamera() {
+            const radius = 15;
+            const x = radius * Math.sin(cameraAngleY) * Math.cos(cameraAngleX);
+            const y = radius * Math.sin(cameraAngleX);
+            const z = radius * Math.cos(cameraAngleY) * Math.cos(cameraAngleX);
+    
+            camera.position.set(cube.position.x + x, cube.position.y + y, cube.position.z + z);
+            camera.lookAt(cube.position);
+        }
+    
+        function updateEnemies(deltaTime) {
+            for (let i = enemies.length - 1; i >= 0; i--) {
+                const enemy = enemies[i];
+                enemy.position.z += 10 * deltaTime;
+    
+                if (boxCollision(cube, enemy)) {
+                    gameOver();
+                    return;
+                }
+    
+                if (enemy.position.z > 50) {
+                    scene.remove(enemy);
+                    enemies.splice(i, 1);
+                    score++;
+                    updateScore();
+                }
+            }
+        }
+    
+        function spawnEnemies() {
+            if (Math.random() < 0.02) {
+                const enemy = createBox(1, 1, 1, 0xff0000, (Math.random() - 0.5) * 18, 0.5, -50);
+                enemy.castShadow = true;
+                scene.add(enemy);
+                enemies.push(enemy);
+            }
+        }
+    
+        function boxCollision(box1, box2) {
+            return (
+                Math.abs(box1.position.x - box2.position.x) * 2 < (box1.width + box2.width) &&
+                Math.abs(box1.position.y - box2.position.y) * 2 < (box1.height + box2.height) &&
+                Math.abs(box1.position.z - box2.position.z) * 2 < (box1.depth + box2.depth)
+            );
+        }
+    
+        function gameOver() {
+            gameState = 'gameOver';
+            submitScore(playerName, score);
+            alert(`Game Over! Your score: ${score}`);
+            exitGame();
+        }
+    
+        function updateScore() {
+            document.getElementById('score').textContent = `Score: ${score}`;
+        }
+    
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+    
+        function onMouseMove(event) {
+            if (gameState === 'playing' && isMouseDown) {
+                const movementX = event.movementX || event.mozMovementX || event.webkitMovementX || 0;
+                const movementY = event.movementY || event.mozMovementY || event.webkitMovementY || 0;
+    
+                cameraAngleY += movementX * 0.002; // Inverted X-axis
+                cameraAngleX += movementY * 0.002; // Inverted Y-axis
+    
+                // Limit vertical rotation
+                cameraAngleX = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, cameraAngleX));
+            }
+        }
+    
+        // Event listeners
+        document.addEventListener('keydown', (event) => {
+            if (gameState !== 'playing') return;
+    
+            switch (event.code) {
+                case 'KeyA': cube.velocity.x = -10; break;
+                case 'KeyD': cube.velocity.x = 10; break;
+                case 'KeyW': cube.velocity.z = -10; break;
+                case 'KeyS': cube.velocity.z = 10; break;
+                case 'Space':
+                    if (cube.position.y <= 0.5) {
+                        cube.velocity.y = 15;
+                    }
+                    event.preventDefault(); // Prevent spacebar from triggering button clicks
+                    break;
+            }
+        });
+    
+        document.addEventListener('keyup', (event) => {
+            if (gameState !== 'playing') return;
+    
+            switch (event.code) {
+                case 'KeyA':
+                case 'KeyD':
+                    cube.velocity.x = 0;
+                    break;
+                case 'KeyW':
+                case 'KeyS':
+                    cube.velocity.z = 0;
+                    break;
+            }
+        });
+    
+        document.getElementById('startButton').addEventListener('click', startGame);
+        document.getElementById('pauseButton').addEventListener('click', (e) => {
+            pauseGame();
+            e.target.blur(); // Remove focus from the button after click
+        });
+        document.getElementById('exitButton').addEventListener('click', (e) => {
+            exitGame();
+            e.target.blur(); // Remove focus from the button after click
+        });
+    
+        // Initialize and start the game loop
+        init();
+        animate();
+    </script>
+    <script>
+        // Add this function to send the score to the backend
+        async function submitScore(name, score) {
+            console.log('Submitting score:', { name, score });
+            const response = await fetch('http://localhost:3000/api/scores', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ name, score })
+            });
+            if (!response.ok) {
+                console.error('Failed to submit score');
+            } else {
+                console.log('Score submitted successfully');
+            }
+        }
+    </script>
+</body>
+</html>

@@ -26,4 +26,14 @@ router.post('/', async (req, res) => {
     }
 });
 
+// GET /api/scores
+router.get('/', async (req, res) => {
+    try {
+        const scores = await Score.find({}, { name: 1, score: 1, date: 1 }).sort({ score: -1 }).exec();
+        res.status(200).json(scores);
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to get scores' });
+    }
+});
+
 export default router;
