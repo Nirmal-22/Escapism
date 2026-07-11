@@ -1,101 +1,38 @@
-# 3D Cube Game Backend
+# Escapism — Leaderboard API
 
-This project is a backend service for the 3D Cube Game. It stores player scores along with player names and game timestamps, and it provides a RESTful API built with TypeScript and Express for managing scores.
+Express + TypeScript service that stores runs and serves the global leaderboard for [Escapism](../README.md). Persistence is Neon Postgres via `@neondatabase/serverless`. In production the app is wrapped as a Vercel serverless function ([../api/index.ts](../api/index.ts)); locally it runs as a normal Node server.
 
-## Features
+## Layout
 
--   **Score Storage:** Persist player scores with names and timestamps.
--   **Leaderboard Support:** Retrieve and sort scores for building a leaderboard.
--   **RESTful API:** Endpoints for submitting and retrieving scores.
--   **MongoDB Integration:** Uses Mongoose for simple data modeling.
-
-## Project Structure
-3d-cube-game-backend
-├── src
-│   ├── controllers         
-│   ├── models             
-│   ├── routes              
-│   ├── services           
-│   └── app.ts              
-├── package.json           
-├── tsconfig.json          
-└── README.md             
-
-## Installation & Setup
-
-1.  **Clone the Repository**
-
-    ```sh
-    git clone <repository-url>
-    cd 3d-cube-game-backend
-    ```
-
-2.  **Install Dependencies**
-
-    ```sh
-    npm install
-    ```
-
-3.  **Configure Environment Variables**
-
-    Create a `.env` file in the project root with the following content (adjust as needed):
-
-    ```
-    MONGODB_URI=mongodb://localhost:27017/cube_game
-    PORT=3000
-    ```
-
-4.  **Compile TypeScript**
-
-    ```sh
-    npm run build
-    ```
-
-5.  **Start the Server**
-
-    ```sh
-    npm start
-    ```
-
-## API Endpoints
-
-### `POST /api/scores`
-
-**Description:** Submit a new score.
-
-**Request Body:**
-
-```json
-{
-  "name": "Player Name",
-  "score": 100,
-  "date": "2023-10-01T12:00:00Z"
-} 
+```
+src/
+├── app.ts                          # Express app (no listen) — shared by dev server & Vercel function
+├── server.ts                       # local dev entry: serves the game + API on one origin
+├── db.ts                           # Neon driver, query helper, lazy schema creation
+├── routes/scoreRoutes.ts           # /api/scores wiring
+├── controllers/scoreController.ts  # HTTP layer
+├── services/scoreService.ts        # validation + SQL
+└── models/score.ts                 # API response shapes
+schema.sql                          # reference DDL (auto-applied on first request)
 ```
 
-Notes: This endpoint accepts a JSON payload to create a new score record.
+Dependencies live in the **repo-root `package.json`** — one manifest for the function bundle, the dev server, and the tooling. (They were previously split across two manifests, which broke fresh installs.)
 
-**GET /api/scores**
-Description: Retrieve all scores sorted in descending order by score.
+## Endpoints
 
-Response JSON:
-```json
-[
-  {
-    "name": "Player Name",
-    "score": 100,
-    "date": "2023-10-01T12:00:00Z"
-  }
-]
-```
-**Development Setup**
-VS Code Configuration: Launch configurations are available in launch.json and project tasks are defined in tasks.json for compiling TypeScript using tsconfig.json.
+- `POST /api/scores` — `{ name, score }` → `201 { name, score, date, rank }`. Name is trimmed and control-character-stripped, 1–20 chars; score must be an integer 0–100000. Rank is `COUNT(*) + 1` over strictly higher scores.
+- `GET /api/scores?limit=10` — top scores ordered `score DESC, created_at ASC`, limit capped at 100.
+- `GET /api/health` — `{ ok: true }`.
 
-**Testing**: Basic unit tests can be added to ensure API endpoints and business logic work as expected. Consider using a framework like Jest.
+Errors return `{ "error": "message" }` with `400` (validation), `503` (`DATABASE_URL` missing), or `500`.
 
-**Additional Notes**
-Data Model: The score data model is defined in the models folder using Mongoose, mapping to the corresponding collection in MongoDB.
+## Environment
 
-**Business Logic**: Core logic for handling score creation and fetching is contained in the services layer to keep controllers clean and focused.
+| Var | Purpose |
+|---|---|
+| `DATABASE_URL` | Neon Postgres connection string (Vercel injects it when a Neon database is connected to the project) |
+| `PORT` | Local dev server port (default 3000) |
 
-**Error Handling**: Global error handling middleware is implemented in app.ts for consistent API error responses.
+## Run
+
+From the repo root: `npm run dev` (ts-node) · `npm run typecheck` · `npm run build:server` then `npm run start:server`.

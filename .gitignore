@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env*
+!.env.example
+.vercel/
+*.log
+.DS_Store
+
+# personal files kept out of the public repo
+resume_bullets.tex
+resume_session_summary.md

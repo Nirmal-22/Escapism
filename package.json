@@ -1,9 +1,31 @@
 {
+  "name": "escapism",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Browser 3D dodge game (Three.js) with an Express + TypeScript leaderboard API on Neon Postgres, deployed on Vercel.",
+  "scripts": {
+    "dev": "ts-node -P 3d-cube-game-backend/tsconfig.json 3d-cube-game-backend/src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "build:server": "tsc -p 3d-cube-game-backend",
+    "start:server": "node 3d-cube-game-backend/dist/server.js"
+  },
   "dependencies": {
+    "@neondatabase/serverless": "^1.0.0",
     "cors": "^2.8.5",
-    "dotenv": "^16.4.7"
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "morgan": "^1.10.0"
   },
   "devDependencies": {
-    "@types/cors": "^2.8.17"
-  }
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/morgan": "^1.9.9",
+    "@types/node": "^20.17.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.2"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "ISC"
 }

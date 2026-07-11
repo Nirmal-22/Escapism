@@ -1,19 +1,11 @@
-// import { mongoose, Schema, model, Document } from 'mongoose';
-import { Schema, model, Document } from 'mongoose';
-
-export interface IScore extends Document {
-    name: string;
-    score: number;
-    date: Date;
+// Shapes returned by the leaderboard API.
+// Persistence is plain SQL against Neon Postgres — see ../db.ts and ../../schema.sql.
+export interface Score {
+  name: string;
+  score: number;
+  date: string;
 }
 
-const scoreSchema = new Schema({
-    name: { type: String, required: true },
-    score: { type: Number, required: true },
-    date: { type: Date, default: Date.now }
-}, { collection: 'escapism'});
-
-const Score = model<IScore>('Score', scoreSchema);
-// const Score = mongoose.model('Score', scoreSchema);
-
-export default Score;
+export interface RankedScore extends Score {
+  rank: number;
+}

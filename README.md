@@ -1,101 +1,65 @@
-# 3D Cube Game Backend
+# Escapism 🟩
 
-This project is a backend service for the 3D Cube Game. It stores player scores along with player names and game timestamps, and it provides a RESTful API built with TypeScript and Express for managing scores.
+A browser 3D dodge game. You are a green cube; red cubes want you dead. Dodge them as the world speeds up, then claim your rank on the global leaderboard.
 
-## Features
+**▶ Play:** `https://<your-project>.vercel.app` *(add the real URL after the first deploy)*
 
--   **Score Storage:** Persist player scores with names and timestamps.
--   **Leaderboard Support:** Retrieve and sort scores for building a leaderboard.
--   **RESTful API:** Endpoints for submitting and retrieving scores.
--   **MongoDB Integration:** Uses Mongoose for simple data modeling.
+> 📸 *Add a gameplay GIF here — it's the first thing visitors look for.*
 
-## Project Structure
-3d-cube-game-backend
-├── src
-│   ├── controllers         
-│   ├── models             
-│   ├── routes              
-│   ├── services           
-│   └── app.ts              
-├── package.json           
-├── tsconfig.json          
-└── README.md             
+## Controls
 
-## Installation & Setup
+`WASD` move · `Space` jump · `P` pause · drag mouse to orbit the camera
 
-1.  **Clone the Repository**
+## How it's built
 
-    ```sh
-    git clone <repository-url>
-    cd 3d-cube-game-backend
-    ```
+| Piece | Tech | Where |
+|---|---|---|
+| Game | Three.js (r128), single file, zero build step | [index.html](index.html) |
+| API | Express + TypeScript, wrapped as a Vercel serverless function | [3d-cube-game-backend/src](3d-cube-game-backend/src), entry [api/index.ts](api/index.ts) |
+| Database | Neon Postgres (serverless HTTP driver) | [db.ts](3d-cube-game-backend/src/db.ts), [schema.sql](3d-cube-game-backend/schema.sql) |
 
-2.  **Install Dependencies**
-
-    ```sh
-    npm install
-    ```
-
-3.  **Configure Environment Variables**
-
-    Create a `.env` file in the project root with the following content (adjust as needed):
-
-    ```
-    MONGODB_URI=mongodb://localhost:27017/cube_game
-    PORT=3000
-    ```
-
-4.  **Compile TypeScript**
-
-    ```sh
-    npm run build
-    ```
-
-5.  **Start the Server**
-
-    ```sh
-    npm start
-    ```
-
-## API Endpoints
-
-### `POST /api/scores`
-
-**Description:** Submit a new score.
-
-**Request Body:**
-
-```json
-{
-  "name": "Player Name",
-  "score": 100,
-  "date": "2023-10-01T12:00:00Z"
-} 
+```
+Browser ── /  ───────► Vercel static hosting (index.html)
+        └─ /api/* ───► Vercel function (api/index.ts → Express app) ───► Neon Postgres
 ```
 
-Notes: This endpoint accepts a JSON payload to create a new score record.
+The same Express app also runs as a normal server for local development ([server.ts](3d-cube-game-backend/src/server.ts)), serving the game at the same origin — dev and prod behave identically.
 
-**GET /api/scores**
-Description: Retrieve all scores sorted in descending order by score.
+Gameplay engineering notes:
 
-Response JSON:
-```json
-[
-  {
-    "name": "Player Name",
-    "score": 100,
-    "date": "2023-10-01T12:00:00Z"
-  }
-]
+- **Frame-rate independent physics *and* spawning** — spawn probability is per second, not per frame, so a 144 Hz monitor doesn't make the game 2.4× harder than a 60 Hz one.
+- **Delta-time clamping + auto-pause** on tab switch — no teleporting enemies after alt-tab.
+- **Difficulty ramps with score** — spawn rate and enemy speed scale up to a cap, so runs actually end.
+- **Server-side validation and ranking** — name/score bounds enforced in the service layer; rank computed against the score index on insert.
+
+## API
+
+| Route | Description |
+|---|---|
+| `POST /api/scores` | Body `{ "name": "...", "score": 42 }` → `201` with `{ name, score, date, rank }` |
+| `GET /api/scores?limit=10` | Top scores, highest first (limit capped at 100) |
+| `GET /api/health` | Liveness check |
+
+Validation: name 1–20 printable chars, score an integer 0–100000. Errors come back as `{ "error": "message" }`.
+
+## Run locally
+
+```sh
+npm install
+cp .env.example .env    # paste your Neon connection string
+npm run dev             # game + API at http://localhost:3000
 ```
-**Development Setup**
-VS Code Configuration: Launch configurations are available in launch.json and project tasks are defined in tasks.json for compiling TypeScript using tsconfig.json.
 
-**Testing**: Basic unit tests can be added to ensure API endpoints and business logic work as expected. Consider using a framework like Jest.
+The Neon serverless driver talks HTTP to Neon's proxy, so local dev also points at your (free) cloud database — no local Postgres needed. The schema auto-creates on the first API call; [schema.sql](3d-cube-game-backend/schema.sql) is the reference DDL.
 
-**Additional Notes**
-Data Model: The score data model is defined in the models folder using Mongoose, mapping to the corresponding collection in MongoDB.
+Other scripts: `npm run typecheck` · `npm run build:server` + `npm run start:server` (classic Node deploy without Vercel).
 
-**Business Logic**: Core logic for handling score creation and fetching is contained in the services layer to keep controllers clean and focused.
+## Deploy (free)
 
-**Error Handling**: Global error handling middleware is implemented in app.ts for consistent API error responses.
+1. Vercel → **Add New Project** → import this repo → framework preset **Other**, no build command → Deploy.
+2. In the Vercel project: **Storage → Create Database → Neon (Postgres)** → connect. Vercel injects `DATABASE_URL` automatically.
+3. Redeploy once so the function picks up the env var. Play, die, submit — the leaderboard is live.
+
+## Roadmap
+
+Touch controls · sound with mute · daily leaderboard · server-side run-duration sanity checks (anti-cheat) · ghost replay of your best run
