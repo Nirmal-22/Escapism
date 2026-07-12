@@ -9,9 +9,9 @@ src/
 ├── app.ts                          # Express app (no listen) — shared by dev server & Vercel function
 ├── server.ts                       # local dev entry: serves the game + API on one origin
 ├── db.ts                           # Neon driver, query helper, lazy schema creation
-├── routes/scoreRoutes.ts           # /api/scores wiring
-├── controllers/scoreController.ts  # HTTP layer
-├── services/scoreService.ts        # validation + SQL
+├── routes/                         # /api/scores and /api/auth wiring
+├── controllers/                    # HTTP layer (scores, auth/session cookies)
+├── services/                       # scoreService: validation + SQL · authService: OAuth 2.0 + bcrypt + JWT
 └── models/score.ts                 # API response shapes
 schema.sql                          # reference DDL (auto-applied on first request)
 ```
@@ -20,17 +20,25 @@ Dependencies live in the **repo-root `package.json`** — one manifest for the f
 
 ## Endpoints
 
-- `POST /api/scores` — `{ name, score }` → `201 { name, score, date, rank }`. Name is trimmed and control-character-stripped, 1–20 chars; score must be an integer 0–100000. Rank is `COUNT(*) + 1` over strictly higher scores.
-- `GET /api/scores?limit=10` — top scores ordered `score DESC, created_at ASC`, limit capped at 100.
+- `POST /api/scores` — `{ name, score }` → `201 { name, score, date, rank }`. Name is trimmed and control-character-stripped, 1–20 chars; score must be an integer 0–100000. Signed-in requests (session cookie) bind the run to the player. Rank counts leaderboard entities (best run per player, guests per-run) with strictly higher scores.
+- `GET /api/scores?limit=10` — top scores, best-per-player (`DISTINCT ON`), ordered `score DESC, created_at ASC`, limit capped at 100.
+- `POST /api/auth/signup` — `{ email, password, name? }` → creates a bcrypt-hashed account, sets the session cookie.
+- `POST /api/auth/login` — `{ email, password }` → verifies and sets the session cookie (uniform 401, no user enumeration).
+- `GET /api/auth/google` / `GET /api/auth/google/callback` — OAuth 2.0 authorization-code flow with a signed-state CSRF check; links to an existing password account when the Google-verified email matches.
+- `GET /api/auth/me` — `{ google, password, signedIn, name?, best? }` (per-method availability flags).
+- `POST /api/auth/logout` — clears the session cookie.
 - `GET /api/health` — `{ ok: true }`.
 
-Errors return `{ "error": "message" }` with `400` (validation), `503` (`DATABASE_URL` missing), or `500`.
+Sessions are stateless JWTs in an httpOnly `SameSite=Lax` cookie (30 days) — no session store, serverless-friendly. Errors return `{ "error": "message" }` with `400`/`401`/`409` (validation/auth), `503` (not configured / DB missing), or `500`.
 
 ## Environment
 
 | Var | Purpose |
 |---|---|
-| `DATABASE_URL` | Neon Postgres connection string (Vercel injects it when a Neon database is connected to the project) |
+| `DATABASE_URL` | Neon Postgres connection string |
+| `SESSION_SECRET` | Signs session cookies; enables email/password sign-in (`openssl rand -hex 32`) |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Enables "Continue with Google" (OAuth web client) |
+| `APP_URL` | Optional: force the OAuth callback base URL (auto-derived otherwise) |
 | `PORT` | Local dev server port (default 3000) |
 
 ## Run

@@ -1,13 +1,26 @@
 import { neon } from '@neondatabase/serverless';
 
 const SCHEMA_STATEMENTS = [
+  `CREATE TABLE IF NOT EXISTS players (
+    id            SERIAL PRIMARY KEY,
+    email         TEXT UNIQUE,
+    google_sub    TEXT UNIQUE,
+    password_hash TEXT,
+    display_name  VARCHAR(24) NOT NULL,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT players_identity CHECK (google_sub IS NOT NULL OR password_hash IS NOT NULL)
+  )`,
   `CREATE TABLE IF NOT EXISTS scores (
     id         SERIAL PRIMARY KEY,
     name       VARCHAR(24) NOT NULL,
     score      INTEGER     NOT NULL CHECK (score >= 0),
+    player_id  INTEGER     REFERENCES players(id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`,
-  `CREATE INDEX IF NOT EXISTS idx_scores_score_desc ON scores (score DESC)`
+  // upgrade path for databases created before player identities existed
+  `ALTER TABLE scores ADD COLUMN IF NOT EXISTS player_id INTEGER REFERENCES players(id)`,
+  `CREATE INDEX IF NOT EXISTS idx_scores_score_desc ON scores (score DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_scores_player ON scores (player_id)`
 ];
 
 export class DbUnavailableError extends Error {

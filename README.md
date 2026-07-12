@@ -38,9 +38,28 @@ Gameplay engineering notes:
 |---|---|
 | `POST /api/scores` | Body `{ "name": "...", "score": 42 }` → `201` with `{ name, score, date, rank }` |
 | `GET /api/scores?limit=10` | Top scores, highest first (limit capped at 100) |
+| `POST /api/auth/signup` | `{ email, password, name? }` → account + session cookie |
+| `POST /api/auth/login` | `{ email, password }` → session cookie |
+| `GET /api/auth/google` | Redirects to Google's consent screen (OAuth 2.0 code flow) |
+| `GET /api/auth/me` | `{ google, password, signedIn, name?, best? }` |
+| `POST /api/auth/logout` | Clears the session cookie |
 | `GET /api/health` | Liveness check |
 
 Validation: name 1–20 printable chars, score an integer 0–100000. Errors come back as `{ "error": "message" }`.
+
+Leaderboard semantics: signed-in players appear once with their **best** run; guest runs count individually. Signed-in runs also carry your personal best across devices.
+
+## Sign in (optional)
+
+Guests can always play. Accounts (hand-rolled — no auth SDK) exist so scores follow you across devices:
+
+- **Email + password** — bcrypt-hashed credentials on the `players` table. Enabled by setting `SESSION_SECRET` (generate with `openssl rand -hex 32`).
+- **Continue with Google** — OAuth 2.0 authorization-code flow implemented directly in Express, with a signed-state CSRF check and stateless JWT sessions in an httpOnly cookie. Also requires `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET`:
+  1. [console.cloud.google.com](https://console.cloud.google.com) → new project → **APIs & Services → OAuth consent screen** → External → fill in the app name → publish.
+  2. **Credentials → Create Credentials → OAuth client ID → Web application** → add redirect URIs `http://localhost:3000/api/auth/google/callback` and `https://<your-app>.vercel.app/api/auth/google/callback`.
+  3. Copy the client ID and secret into `.env` (and Vercel env vars).
+
+A Google sign-in with the same (verified) email as an existing password account links to it automatically. Without any of these env vars, the Sign-in button simply doesn't render.
 
 ## Run locally
 
@@ -56,10 +75,10 @@ Other scripts: `npm run typecheck` · `npm run build:server` + `npm run start:se
 
 ## Deploy (free)
 
-1. Vercel → **Add New Project** → import this repo → framework preset **Other**, no build command → Deploy.
-2. In the Vercel project: **Storage → Create Database → Neon (Postgres)** → connect. Vercel injects `DATABASE_URL` automatically.
-3. Redeploy once so the function picks up the env var. Play, die, submit — the leaderboard is live.
+1. Vercel → **Add New Project** → import this repo → framework preset **Other**, no build command.
+2. **Environment Variables**: add `DATABASE_URL` (your Neon connection string). For sign-in, also add `SESSION_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`.
+3. Deploy. Every push to `main` auto-deploys from then on.
 
 ## Roadmap
 
-Touch controls · sound with mute · daily leaderboard · server-side run-duration sanity checks (anti-cheat) · ghost replay of your best run
+Password reset (needs an email service) · rate limiting on auth + scores · touch controls · sound with mute · daily leaderboard · server-side run-duration sanity checks (anti-cheat) · ghost replay of your best run

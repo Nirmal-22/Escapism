@@ -57,11 +57,21 @@
         .modal h2 { margin: 0 0 6px; }
         .modal .sub { color: var(--muted); font-size: 14px; margin: 0 0 18px; }
         .modal .actions { display: flex; gap: 10px; margin-top: 20px; }
-        input[type=text] {
+        input[type=text], input[type=password] {
             width: 100%; padding: 11px 12px; font-size: 16px; border-radius: 8px;
             border: 1px solid var(--line); background: #0b1524; color: var(--text); outline: none;
         }
-        input[type=text]:focus { border-color: var(--green); }
+        input[type=text]:focus, input[type=password]:focus { border-color: var(--green); }
+        .divider {
+            display: flex; align-items: center; gap: 10px;
+            color: var(--muted); font-size: 12px; margin: 14px 0;
+        }
+        .divider::before, .divider::after { content: ''; flex: 1; border-top: 1px solid var(--line); }
+        .auth-link { color: var(--green); cursor: pointer; text-decoration: underline; }
+        .auth-foot { margin-top: 14px; font-size: 13px; color: var(--muted); }
+        #authError { color: var(--red); font-size: 13px; min-height: 16px; margin-top: 10px; }
+        #authEmail, #authPassword, #authName { margin-bottom: 10px; }
+        #googleBtn { width: 100%; }
         table { width: 100%; border-collapse: collapse; font-size: 14px; }
         th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); }
         th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
@@ -92,7 +102,7 @@
         <div class="brand">ESCAPISM</div>
         <div id="score">Score: 0</div>
         <div id="best">Best: 0</div>
-        <div id="nameChip" title="Change name"><span id="nameChipText">set your name</span><span>✎</span></div>
+        <div id="nameChip" title="Change name"><span id="nameChipText">set your name</span><span id="namePencil">✎</span></div>
     </div>
 
     <div id="gameControls">
@@ -100,6 +110,7 @@
         <button id="pauseButton" style="display:none">Pause</button>
         <button id="exitButton" style="display:none">Exit</button>
         <button id="scoreboardBtn">Leaderboard</button>
+        <button id="authBtn" style="display:none">Sign in</button>
     </div>
 
     <div id="hint" class="pill"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>Space</kbd> jump · <kbd>P</kbd> pause · drag mouse to look</div>
@@ -113,6 +124,27 @@
             <div class="actions">
                 <button id="nameSave" class="primary" style="flex:1">Let's go</button>
                 <button id="nameCancel">Cancel</button>
+            </div>
+            <div class="auth-foot" id="nameAuthFoot" style="display:none">Have an account? <span id="nameToAuth" class="auth-link">Sign in</span></div>
+        </div>
+    </div>
+
+    <div id="authOverlay" class="overlay">
+        <div class="modal" style="width:min(92vw,420px)">
+            <button id="closeAuth" class="close-x">✕</button>
+            <h2>Sign in</h2>
+            <p class="sub">Your scores and personal best follow you to any device.</p>
+            <button id="googleBtn" style="display:none">Continue with Google</button>
+            <div id="authDivider" class="divider">or</div>
+            <div id="authFields">
+                <input id="authEmail" type="text" placeholder="Email" autocomplete="email">
+                <input id="authPassword" type="password" placeholder="Password (min 8 characters)" autocomplete="current-password">
+                <input id="authName" type="text" maxlength="20" placeholder="Display name" style="display:none" autocomplete="nickname">
+                <div id="authError"></div>
+                <div class="actions" style="margin-top:6px">
+                    <button id="authSubmit" class="primary" style="flex:1">Log in</button>
+                </div>
+                <div class="auth-foot"><span id="authSwitchText">New here?</span> <span id="authSwitchLink" class="auth-link">Create account</span></div>
             </div>
         </div>
     </div>
@@ -164,6 +196,8 @@
         let playerName = localStorage.getItem('playerName') || '';
         const keys = new Set();
         let nameOverlayMode = 'edit';
+        let auth = { google: false, password: false, signedIn: false };
+        let authMode = 'login';
 
         const el = (id) => document.getElementById(id);
 
@@ -512,7 +546,10 @@
         }
 
         function updateNameChip() {
-            el('nameChipText').textContent = playerName || 'set your name';
+            el('nameChipText').textContent = auth.signedIn ? `${playerName} ✓` : (playerName || 'set your name');
+            el('namePencil').style.display = auth.signedIn ? 'none' : 'inline';
+            el('nameChip').style.cursor = auth.signedIn ? 'default' : 'pointer';
+            el('nameChip').title = auth.signedIn ? 'Signed in' : 'Change name';
         }
 
         function updateHud() {
@@ -528,8 +565,98 @@
             setTimeout(() => { hint.style.opacity = '0'; }, 4500);
         }
 
+        function showToast(text) {
+            const hint = el('hint');
+            hint.textContent = text;
+            hint.style.opacity = '1';
+            setTimeout(() => { hint.style.opacity = '0'; }, 4000);
+        }
+
+        // ---------- accounts (optional — guests can always play) ----------
+        async function initAuth() {
+            try {
+                const res = await fetch(`${API_BASE}/api/auth/me`);
+                if (!res.ok) return;
+                auth = await res.json();
+                const available = auth.google || auth.password;
+                el('authBtn').style.display = available ? 'inline-block' : 'none';
+                el('authBtn').textContent = auth.signedIn ? 'Sign out' : 'Sign in';
+                el('nameAuthFoot').style.display = available && !auth.signedIn ? 'block' : 'none';
+                if (auth.signedIn) {
+                    playerName = auth.name || playerName;
+                    localStorage.setItem('playerName', playerName);
+                    if ((auth.best || 0) > best) {
+                        best = auth.best;
+                        localStorage.setItem('escapismBest', String(best));
+                    }
+                }
+                updateNameChip();
+                updateHud();
+            } catch (err) {
+                // no API reachable — guest mode only
+            }
+        }
+
+        async function authPost(path, body) {
+            const res = await fetch(`${API_BASE}${path}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || 'request failed — try again');
+            return data;
+        }
+
+        function openAuthModal() {
+            if (gameState === 'playing') setPaused(true);
+            hideOverlay('nameOverlay');
+            el('googleBtn').style.display = auth.google ? 'block' : 'none';
+            el('authDivider').style.display = auth.google && auth.password ? 'flex' : 'none';
+            el('authFields').style.display = auth.password ? 'block' : 'none';
+            el('authError').textContent = '';
+            if (!el('authName').value) el('authName').value = playerName;
+            setAuthMode('login');
+            showOverlay('authOverlay');
+            if (auth.password) setTimeout(() => el('authEmail').focus(), 50);
+        }
+
+        function setAuthMode(mode) {
+            authMode = mode;
+            el('authName').style.display = mode === 'signup' ? 'block' : 'none';
+            el('authPassword').setAttribute('autocomplete', mode === 'signup' ? 'new-password' : 'current-password');
+            el('authSubmit').textContent = mode === 'signup' ? 'Create account' : 'Log in';
+            el('authSwitchText').textContent = mode === 'signup' ? 'Already have an account?' : 'New here?';
+            el('authSwitchLink').textContent = mode === 'signup' ? 'Log in' : 'Create account';
+            el('authError').textContent = '';
+        }
+
+        async function submitAuthForm() {
+            const email = el('authEmail').value.trim();
+            const password = el('authPassword').value;
+            el('authError').textContent = '';
+            try {
+                if (authMode === 'signup') {
+                    const name = el('authName').value.trim() || playerName || email.split('@')[0];
+                    await authPost('/api/auth/signup', { email, password, name });
+                } else {
+                    await authPost('/api/auth/login', { email, password });
+                }
+                el('authPassword').value = '';
+                hideOverlay('authOverlay');
+                await initAuth();
+            } catch (err) {
+                el('authError').textContent = err.message;
+            }
+        }
+
         // ---------- input ----------
         document.addEventListener('keydown', (event) => {
+            if (overlayVisible('authOverlay')) {
+                if (event.code === 'Enter') submitAuthForm();
+                if (event.code === 'Escape') hideOverlay('authOverlay');
+                return;
+            }
             if (overlayVisible('nameOverlay')) {
                 if (event.code === 'Enter') saveNameFromOverlay();
                 if (event.code === 'Escape') hideOverlay('nameOverlay');
@@ -587,7 +714,25 @@
         el('nameCancel').addEventListener('click', () => hideOverlay('nameOverlay'));
         el('playAgainBtn').addEventListener('click', (e) => { e.target.blur(); playAgain(); });
         el('menuBtn').addEventListener('click', (e) => { e.target.blur(); exitToMenu(); });
-        el('nameChip').addEventListener('click', () => openNameOverlay('edit'));
+        el('nameChip').addEventListener('click', () => {
+            if (!auth.signedIn) openNameOverlay('edit');
+        });
+        el('authBtn').addEventListener('click', async (e) => {
+            e.target.blur();
+            if (auth.signedIn) {
+                try { await fetch(`${API_BASE}/api/auth/logout`, { method: 'POST' }); } catch (err) { /* ignore */ }
+                location.reload();
+            } else {
+                openAuthModal();
+            }
+        });
+        el('googleBtn').addEventListener('click', () => {
+            window.location.href = `${API_BASE}/api/auth/google`;
+        });
+        el('authSubmit').addEventListener('click', submitAuthForm);
+        el('authSwitchLink').addEventListener('click', () => setAuthMode(authMode === 'signup' ? 'login' : 'signup'));
+        el('closeAuth').addEventListener('click', () => hideOverlay('authOverlay'));
+        el('nameToAuth').addEventListener('click', openAuthModal);
 
         if ('ontouchstart' in window && !localStorage.getItem('escapismTouchDismissed')) {
             el('touchBanner').style.display = 'inline-flex';
@@ -601,6 +746,11 @@
         init();
         updateHud();
         updateNameChip();
+        initAuth();
+        if (new URLSearchParams(location.search).has('auth_failed')) {
+            showToast('Sign-in failed — please try again.');
+            history.replaceState(null, '', location.pathname);
+        }
         requestAnimationFrame((t) => {
             lastTime = t;
             animate(t);
