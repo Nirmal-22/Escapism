@@ -20,8 +20,8 @@ Dependencies live in the **repo-root `package.json`** — one manifest for the f
 
 ## Endpoints
 
-- `POST /api/scores` — `{ name, score }` → `201 { name, score, date, rank }`. Name is trimmed and control-character-stripped, 1–20 chars; score must be an integer 0–100000. Signed-in requests (session cookie) bind the run to the player. Rank counts leaderboard entities (best run per player, guests per-run) with strictly higher scores.
-- `GET /api/scores?limit=10` — top scores, best-per-player (`DISTINCT ON`), ordered `score DESC, created_at ASC`, limit capped at 100.
+- `POST /api/scores` — **requires a session cookie** (guests get 401; the leaderboard is players-only). `{ name, score }` → `201 { name, score, date, rank }`. Name is trimmed and control-character-stripped, 1–20 chars; score must be an integer 0–100000. Rank counts players with a strictly higher best.
+- `GET /api/scores?limit=10&offset=0` — paginated top-100, best-per-player (`DISTINCT ON` + window count) → `{ scores, total, offset, limit }`.
 - `POST /api/auth/signup` — `{ email, password, name? }` → creates a bcrypt-hashed account, sets the session cookie.
 - `POST /api/auth/login` — `{ email, password }` → verifies and sets the session cookie (uniform 401, no user enumeration).
 - `GET /api/auth/google` / `GET /api/auth/google/callback` — OAuth 2.0 authorization-code flow with a signed-state CSRF check; links to an existing password account when the Google-verified email matches.

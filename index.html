@@ -72,6 +72,10 @@
         #authError { color: var(--red); font-size: 13px; min-height: 16px; margin-top: 10px; }
         #authEmail, #authPassword, #authName { margin-bottom: 10px; }
         #googleBtn { width: 100%; }
+        .pager { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 14px; }
+        .pager span { color: var(--muted); font-size: 13px; }
+        button:disabled { opacity: .35; cursor: default; }
+        button:disabled:hover { border-color: var(--line); }
         table { width: 100%; border-collapse: collapse; font-size: 14px; }
         th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); }
         th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
@@ -101,7 +105,7 @@
     <div class="hud">
         <div class="brand">ESCAPISM</div>
         <div id="score">Score: 0</div>
-        <div id="best">Best: 0</div>
+        <div id="best">Personal best: 0</div>
         <div id="nameChip" title="Change name"><span id="nameChipText">set your name</span><span id="namePencil">✎</span></div>
     </div>
 
@@ -122,10 +126,9 @@
             <p class="sub">Shown on the global leaderboard. Saved on this device.</p>
             <input id="nameInput" type="text" maxlength="20" placeholder="Your name" autocomplete="off">
             <div class="actions">
-                <button id="nameSave" class="primary" style="flex:1">Let's go</button>
+                <button id="nameSave" class="primary" style="flex:1">Save</button>
                 <button id="nameCancel">Cancel</button>
             </div>
-            <div class="auth-foot" id="nameAuthFoot" style="display:none">Have an account? <span id="nameToAuth" class="auth-link">Sign in</span></div>
         </div>
     </div>
 
@@ -155,6 +158,8 @@
             <p class="sub" id="deathStats"></p>
             <div id="rankLine"></div>
             <div id="deathBoard"></div>
+            <div class="auth-foot"><span id="deathToBoard" class="auth-link">View full leaderboard</span></div>
+            <button id="claimBtn" style="display:none; width:100%; margin-top:12px">Sign in to claim</button>
             <div class="actions">
                 <button id="playAgainBtn" class="primary" style="flex:1">Play again — Space</button>
                 <button id="menuBtn">Menu</button>
@@ -166,8 +171,13 @@
         <div class="modal">
             <button id="closeScoreboard" class="close-x">✕</button>
             <h2>Leaderboard</h2>
-            <p class="sub">Top 10 worldwide</p>
+            <p class="sub">Top 100 worldwide — signed-in players, best run each</p>
             <div id="scoreboardContent"></div>
+            <div id="boardPager" class="pager" style="display:none">
+                <button id="prevPage">‹ Prev</button>
+                <span id="pageInfo"></span>
+                <button id="nextPage">Next ›</button>
+            </div>
         </div>
     </div>
 
@@ -198,6 +208,8 @@
         let nameOverlayMode = 'edit';
         let auth = { google: false, password: false, signedIn: false };
         let authMode = 'login';
+        let boardPage = 0;
+        let boardTotal = 0;
 
         const el = (id) => document.getElementById(id);
 
@@ -282,10 +294,7 @@
         }
 
         function requestStart() {
-            if (!playerName) {
-                openNameOverlay('start');
-                return;
-            }
+            // guests play without any name prompt — names only matter on the leaderboard
             startGame();
         }
 
@@ -316,10 +325,6 @@
         }
 
         function playAgain() {
-            if (!playerName) {
-                openNameOverlay('start');
-                return;
-            }
             startGame();
         }
 
@@ -419,37 +424,73 @@
 
         async function showDeathOverlay(isNewBest) {
             const stats = el('deathStats');
-            stats.textContent = `You dodged ${score} cube${score === 1 ? '' : 's'} · Best: ${best}`;
+            stats.textContent = `You dodged ${score} cube${score === 1 ? '' : 's'} · Personal best: ${best}`;
             if (isNewBest) {
                 const badge = document.createElement('span');
                 badge.className = 'badge';
                 badge.textContent = 'NEW BEST';
                 stats.appendChild(badge);
             }
-            el('rankLine').textContent = 'Saving your score…';
             el('deathBoard').textContent = '';
+            el('claimBtn').style.display = 'none';
             showOverlay('deathOverlay');
 
             let myRank = null;
-            try {
-                const saved = await submitScore(playerName, score);
-                myRank = saved.rank;
-                el('rankLine').textContent = `World rank #${saved.rank} as ${saved.name}`;
-            } catch (err) {
-                el('rankLine').textContent = 'Could not reach the leaderboard — score not saved.';
+            if (auth.signedIn) {
+                el('rankLine').textContent = 'Saving your score…';
+                try {
+                    const saved = await submitScore(playerName, score);
+                    myRank = saved.rank;
+                    el('rankLine').textContent = `World rank #${saved.rank} as ${saved.name}`;
+                } catch (err) {
+                    el('rankLine').textContent = 'Could not reach the leaderboard — score not saved.';
+                }
+            } else {
+                // guest run: nothing is submitted — offer to claim it via sign-in
+                setPendingClaim(score);
+                if (auth.google || auth.password) {
+                    el('rankLine').textContent = 'Guest run — only signed-in scores make the leaderboard.';
+                    el('claimBtn').textContent = `Sign in to claim ${getPendingClaim()} on the leaderboard`;
+                    el('claimBtn').style.display = 'block';
+                } else {
+                    el('rankLine').textContent = '';
+                }
             }
             try {
-                const top = await fetchTopScores(10);
-                renderScoreTable(el('deathBoard'), top, myRank);
+                const page = await fetchScores(0);
+                renderScoreTable(el('deathBoard'), page.scores, { startRank: 1, highlightRank: myRank });
             } catch (err) {
                 // rankLine already tells the offline story
             }
         }
 
-        async function fetchTopScores(limit) {
-            const res = await fetch(`${API_BASE}/api/scores?limit=${limit}`);
+        // best unclaimed guest run on this device; submitted automatically on sign-in
+        function getPendingClaim() {
+            return Number(localStorage.getItem('escapismPending')) || 0;
+        }
+
+        function setPendingClaim(value) {
+            if (value > 0 && value > getPendingClaim()) {
+                localStorage.setItem('escapismPending', String(value));
+            }
+        }
+
+        async function submitPendingClaim() {
+            const pending = getPendingClaim();
+            if (!auth.signedIn || !pending) return;
+            try {
+                const saved = await submitScore(playerName, pending);
+                localStorage.removeItem('escapismPending');
+                showToast(`Claimed! ${pending} pts is now world rank #${saved.rank}`);
+            } catch (err) {
+                // keep the pending run; we'll retry on the next sign-in
+            }
+        }
+
+        async function fetchScores(page) {
+            const res = await fetch(`${API_BASE}/api/scores?limit=10&offset=${page * 10}`);
             if (!res.ok) throw new Error(`leaderboard request failed (${res.status})`);
-            return res.json();
+            return res.json(); // { scores, total, offset, limit }
         }
 
         async function submitScore(name, value) {
@@ -462,7 +503,8 @@
             return res.json();
         }
 
-        function renderScoreTable(container, scores, highlightRank) {
+        function renderScoreTable(container, scores, opts) {
+            const { startRank = 1, highlightRank = null, appendYou = false } = opts || {};
             container.textContent = '';
             if (!scores.length) {
                 container.textContent = 'No scores yet — be the first!';
@@ -491,13 +533,13 @@
                 tbody.appendChild(tr);
             };
             scores.forEach((item, i) => {
-                const rank = i + 1;
+                const rank = startRank + i;
                 addRow(
                     [String(rank), item.name, String(item.score), formatDate(item.date)],
                     highlightRank === rank && item.name === playerName
                 );
             });
-            if (highlightRank && highlightRank > scores.length) {
+            if (appendYou && highlightRank && highlightRank >= startRank + scores.length) {
                 addRow([String(highlightRank), playerName, String(score), 'just now'], true);
             }
             table.appendChild(tbody);
@@ -511,12 +553,38 @@
 
         async function openLeaderboard() {
             if (gameState === 'playing') setPaused(true);
-            el('scoreboardContent').textContent = 'Loading…';
+            boardPage = 0;
             showOverlay('scoreboardOverlay');
+            loadBoardPage();
+        }
+
+        async function loadBoardPage() {
+            el('scoreboardContent').textContent = 'Loading…';
             try {
-                renderScoreTable(el('scoreboardContent'), await fetchTopScores(10), null);
+                const page = await fetchScores(boardPage);
+                boardTotal = page.total;
+                renderScoreTable(el('scoreboardContent'), page.scores, { startRank: boardPage * 10 + 1 });
+                updatePager();
             } catch (err) {
                 el('scoreboardContent').textContent = 'Leaderboard unavailable right now — try again in a moment.';
+                el('boardPager').style.display = 'none';
+            }
+        }
+
+        function updatePager() {
+            const pages = Math.max(1, Math.ceil(boardTotal / 10));
+            el('boardPager').style.display = boardTotal > 10 ? 'flex' : 'none';
+            el('pageInfo').textContent = `Page ${boardPage + 1} of ${pages} · ${boardTotal} player${boardTotal === 1 ? '' : 's'}`;
+            el('prevPage').disabled = boardPage === 0;
+            el('nextPage').disabled = boardPage >= pages - 1;
+        }
+
+        function turnBoardPage(delta) {
+            const pages = Math.max(1, Math.ceil(boardTotal / 10));
+            const next = Math.min(Math.max(boardPage + delta, 0), pages - 1);
+            if (next !== boardPage) {
+                boardPage = next;
+                loadBoardPage();
             }
         }
 
@@ -546,15 +614,20 @@
         }
 
         function updateNameChip() {
-            el('nameChipText').textContent = auth.signedIn ? `${playerName} ✓` : (playerName || 'set your name');
-            el('namePencil').style.display = auth.signedIn ? 'none' : 'inline';
-            el('nameChip').style.cursor = auth.signedIn ? 'default' : 'pointer';
-            el('nameChip').title = auth.signedIn ? 'Signed in' : 'Change name';
+            if (auth.signedIn) {
+                el('nameChipText').textContent = `${playerName} ✓`;
+                el('namePencil').style.display = 'inline';
+                el('nameChip').title = 'Change display name';
+            } else {
+                el('nameChipText').textContent = 'guest — sign in for the leaderboard';
+                el('namePencil').style.display = 'none';
+                el('nameChip').title = 'Sign in';
+            }
         }
 
         function updateHud() {
             el('score').textContent = `Score: ${score}`;
-            el('best').textContent = `Best: ${best}`;
+            el('best').textContent = `Personal best: ${best}`;
         }
 
         function maybeShowHint() {
@@ -581,7 +654,6 @@
                 const available = auth.google || auth.password;
                 el('authBtn').style.display = available ? 'inline-block' : 'none';
                 el('authBtn').textContent = auth.signedIn ? 'Sign out' : 'Sign in';
-                el('nameAuthFoot').style.display = available && !auth.signedIn ? 'block' : 'none';
                 if (auth.signedIn) {
                     playerName = auth.name || playerName;
                     localStorage.setItem('playerName', playerName);
@@ -592,6 +664,7 @@
                 }
                 updateNameChip();
                 updateHud();
+                await submitPendingClaim();
             } catch (err) {
                 // no API reachable — guest mode only
             }
@@ -611,6 +684,7 @@
         function openAuthModal() {
             if (gameState === 'playing') setPaused(true);
             hideOverlay('nameOverlay');
+            hideOverlay('deathOverlay');
             el('googleBtn').style.display = auth.google ? 'block' : 'none';
             el('authDivider').style.display = auth.google && auth.password ? 'flex' : 'none';
             el('authFields').style.display = auth.password ? 'block' : 'none';
@@ -653,7 +727,7 @@
         // ---------- input ----------
         document.addEventListener('keydown', (event) => {
             if (overlayVisible('authOverlay')) {
-                if (event.code === 'Enter') submitAuthForm();
+                if (event.code === 'Enter' && auth.password) submitAuthForm();
                 if (event.code === 'Escape') hideOverlay('authOverlay');
                 return;
             }
@@ -662,16 +736,19 @@
                 if (event.code === 'Escape') hideOverlay('nameOverlay');
                 return;
             }
+            // scoreboard may be open ON TOP of the death overlay — check it first
+            if (overlayVisible('scoreboardOverlay')) {
+                if (event.code === 'Escape') hideOverlay('scoreboardOverlay');
+                if (event.code === 'ArrowLeft') turnBoardPage(-1);
+                if (event.code === 'ArrowRight') turnBoardPage(1);
+                return;
+            }
             if (overlayVisible('deathOverlay')) {
                 if (event.code === 'Space' || event.code === 'Enter' || event.code === 'KeyR') {
                     event.preventDefault();
                     playAgain();
                 }
                 if (event.code === 'Escape') exitToMenu();
-                return;
-            }
-            if (overlayVisible('scoreboardOverlay')) {
-                if (event.code === 'Escape') hideOverlay('scoreboardOverlay');
                 return;
             }
             if (gameState !== 'playing' && gameState !== 'paused') return;
@@ -715,8 +792,13 @@
         el('playAgainBtn').addEventListener('click', (e) => { e.target.blur(); playAgain(); });
         el('menuBtn').addEventListener('click', (e) => { e.target.blur(); exitToMenu(); });
         el('nameChip').addEventListener('click', () => {
-            if (!auth.signedIn) openNameOverlay('edit');
+            if (auth.signedIn) openNameOverlay('edit');
+            else if (auth.google || auth.password) openAuthModal();
         });
+        el('claimBtn').addEventListener('click', (e) => { e.target.blur(); openAuthModal(); });
+        el('deathToBoard').addEventListener('click', openLeaderboard);
+        el('prevPage').addEventListener('click', (e) => { e.target.blur(); turnBoardPage(-1); });
+        el('nextPage').addEventListener('click', (e) => { e.target.blur(); turnBoardPage(1); });
         el('authBtn').addEventListener('click', async (e) => {
             e.target.blur();
             if (auth.signedIn) {
@@ -732,7 +814,6 @@
         el('authSubmit').addEventListener('click', submitAuthForm);
         el('authSwitchLink').addEventListener('click', () => setAuthMode(authMode === 'signup' ? 'login' : 'signup'));
         el('closeAuth').addEventListener('click', () => hideOverlay('authOverlay'));
-        el('nameToAuth').addEventListener('click', openAuthModal);
 
         if ('ontouchstart' in window && !localStorage.getItem('escapismTouchDismissed')) {
             el('touchBanner').style.display = 'inline-flex';

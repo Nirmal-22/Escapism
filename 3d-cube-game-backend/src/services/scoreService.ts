@@ -3,7 +3,8 @@ import { RankedScore, Score } from '../models/score';
 
 const NAME_MAX_LENGTH = 20;
 const SCORE_MAX = 100000;
-const LEADERBOARD_MAX_LIMIT = 100;
+const LEADERBOARD_SIZE = 100;
+const PAGE_MAX = 100;
 
 export class ValidationError extends Error {
   public status = 400;
@@ -38,11 +39,23 @@ function parseScore(raw: unknown): number {
   return value;
 }
 
-// Leaderboard identity: signed-in players count once (their best run, via
-// player_id); guest rows have no player_id and count per-run (-id keeps each
-// row a distinct entity, never colliding with positive player ids).
+function parsePage(raw: unknown, fallback: number, max: number): number {
+  const value = Number(raw);
+  return Number.isInteger(value) && value >= 0 ? Math.min(value, max) : fallback;
+}
+
+export interface LeaderboardPage {
+  scores: Score[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
+// The leaderboard is players-only: guests play locally and never POST here
+// (the controller rejects sessionless submits). Each player appears once,
+// with their best run.
 export class ScoreService {
-  public async createScore(rawName: unknown, rawScore: unknown, playerId: number | null = null): Promise<RankedScore> {
+  public async createScore(rawName: unknown, rawScore: unknown, playerId: number): Promise<RankedScore> {
     const name = parsePlayerName(rawName);
     const score = parseScore(rawScore);
     await ensureSchema();
@@ -53,33 +66,47 @@ export class ScoreService {
     );
     const [{ rank }] = await query(
       `SELECT COUNT(*)::int + 1 AS rank FROM (
-         SELECT COALESCE(player_id, -id) AS entity, MAX(score) AS best_score
+         SELECT player_id, MAX(score) AS best_score
          FROM scores
-         GROUP BY COALESCE(player_id, -id)
+         WHERE player_id IS NOT NULL
+         GROUP BY player_id
        ) t
-       WHERE t.best_score > $1 AND ($2::int IS NULL OR t.entity <> $2)`,
+       WHERE t.best_score > $1 AND t.player_id <> $2`,
       [score, playerId]
     );
 
     return { name: saved.name, score: saved.score, date: saved.created_at, rank };
   }
 
-  public async getTopScores(rawLimit?: unknown): Promise<Score[]> {
-    const requested = Number(rawLimit);
-    const limit =
-      Number.isInteger(requested) && requested > 0 ? Math.min(requested, LEADERBOARD_MAX_LIMIT) : 10;
+  public async getTopScores(rawLimit?: unknown, rawOffset?: unknown): Promise<LeaderboardPage> {
+    const limit = Math.max(1, parsePage(rawLimit, 10, PAGE_MAX));
+    const offset = parsePage(rawOffset, 0, LEADERBOARD_SIZE);
     await ensureSchema();
 
+    // best run per player → top 100 → requested page; the window count is the
+    // top-100 size, so the client can render pagination from any page.
     const rows = await query(
-      `SELECT name, score, created_at FROM (
-         SELECT DISTINCT ON (COALESCE(player_id, -id)) name, score, created_at
-         FROM scores
-         ORDER BY COALESCE(player_id, -id), score DESC, created_at ASC
-       ) best
+      `SELECT name, score, created_at, COUNT(*) OVER()::int AS total
+       FROM (
+         SELECT name, score, created_at FROM (
+           SELECT DISTINCT ON (player_id) name, score, created_at
+           FROM scores
+           WHERE player_id IS NOT NULL
+           ORDER BY player_id, score DESC, created_at ASC
+         ) per_player
+         ORDER BY score DESC, created_at ASC
+         LIMIT ${LEADERBOARD_SIZE}
+       ) top
        ORDER BY score DESC, created_at ASC
-       LIMIT $1`,
-      [limit]
+       LIMIT $1 OFFSET $2`,
+      [limit, offset]
     );
-    return rows.map((row) => ({ name: row.name, score: row.score, date: row.created_at }));
+
+    return {
+      scores: rows.map((row) => ({ name: row.name, score: row.score, date: row.created_at })),
+      total: rows.length ? rows[0].total : 0,
+      offset,
+      limit
+    };
   }
 }

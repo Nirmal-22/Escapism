@@ -36,8 +36,8 @@ Gameplay engineering notes:
 
 | Route | Description |
 |---|---|
-| `POST /api/scores` | Body `{ "name": "...", "score": 42 }` → `201` with `{ name, score, date, rank }` |
-| `GET /api/scores?limit=10` | Top scores, highest first (limit capped at 100) |
+| `POST /api/scores` | Requires sign-in (401 for guests). Body `{ "name": "...", "score": 42 }` → `201` with `{ name, score, date, rank }` |
+| `GET /api/scores?limit=10&offset=0` | Paginated top-100 → `{ scores, total, offset, limit }` |
 | `POST /api/auth/signup` | `{ email, password, name? }` → account + session cookie |
 | `POST /api/auth/login` | `{ email, password }` → session cookie |
 | `GET /api/auth/google` | Redirects to Google's consent screen (OAuth 2.0 code flow) |
@@ -47,7 +47,7 @@ Gameplay engineering notes:
 
 Validation: name 1–20 printable chars, score an integer 0–100000. Errors come back as `{ "error": "message" }`.
 
-Leaderboard semantics: signed-in players appear once with their **best** run; guest runs count individually. Signed-in runs also carry your personal best across devices.
+Leaderboard semantics: **players-only** — guests play freely but their runs stay on-device (the API rejects sessionless submits). Each signed-in player appears once with their best run, and personal bests follow you across devices. A guest's best unclaimed run is kept locally and submitted automatically the moment they sign in ("claim your run").
 
 ## Sign in (optional)
 

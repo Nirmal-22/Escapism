@@ -8,9 +8,13 @@ class ScoreController {
   public createScore = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const session = readSession(req.cookies?.[SESSION_COOKIE]);
+      if (!session) {
+        // leaderboard is players-only; guests play locally and never submit
+        res.status(401).json({ error: 'sign in to post scores to the leaderboard' });
+        return;
+      }
       const { name, score } = req.body ?? {};
-      // signed-in runs bind to the player; body name still wins for display
-      const saved = await this.scoreService.createScore(name ?? session?.name, score, session?.id ?? null);
+      const saved = await this.scoreService.createScore(name ?? session.name, score, session.id);
       res.status(201).json(saved);
     } catch (err) {
       next(err);
@@ -19,8 +23,8 @@ class ScoreController {
 
   public getScores = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const scores = await this.scoreService.getTopScores(req.query.limit);
-      res.status(200).json(scores);
+      const page = await this.scoreService.getTopScores(req.query.limit, req.query.offset);
+      res.status(200).json(page);
     } catch (err) {
       next(err);
     }
